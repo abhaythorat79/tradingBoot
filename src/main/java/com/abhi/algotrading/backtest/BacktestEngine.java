@@ -67,6 +67,21 @@ public class BacktestEngine {
         for (List<Candle> dayCandles :
                 candlesByDay.values()) {
 
+            /*
+             * Every trading day gets a fresh daily
+             * risk state.
+             *
+             * This prevents:
+             *
+             * Day 1 trades
+             *       ↓
+             * Day 2 incorrectly blocked
+             *
+             * because of Day 1's trade count,
+             * consecutive losses or daily risk state.
+             */
+            tradingEngine.resetDailyRiskState();
+
             trades.addAll(
                     processTradingDay(dayCandles)
             );
@@ -100,10 +115,6 @@ public class BacktestEngine {
 
         for (Candle candle : dayCandles) {
 
-            /*
-             * Do not process the candles that form
-             * the 09:15 - 09:30 opening range.
-             */
             if (candle.timestamp()
                     .toLocalTime()
                     .isBefore(
@@ -119,19 +130,6 @@ public class BacktestEngine {
                             candle
                     );
 
-            /*
-             * TradingEngine returns the Position object
-             * inside TradeResult even after that Position
-             * has been closed.
-             *
-             * Therefore, for an exit:
-             *
-             * result.action() = exit action
-             * result.position() = CLOSED Position
-             *
-             * We use the exit action to identify the
-             * completed trade.
-             */
             if (isExitAction(result.action())) {
 
                 Position completedPosition =
@@ -157,8 +155,8 @@ public class BacktestEngine {
         /*
          * Safety fallback:
          *
-         * If the final candle did not trigger the normal
-         * EOD exit, close any remaining open position.
+         * If a position somehow remains open after
+         * processing the final candle, close it.
          */
         Position remainingPosition =
                 tradingEngine.getOpenPosition();

@@ -95,22 +95,12 @@ public class TradingEngine {
             );
         }
 
-        /*
-         * Existing position always gets priority.
-         *
-         * We must manage an existing position even
-         * after new-entry time has ended.
-         */
         if (openPosition != null &&
                 openPosition.isOpen()) {
 
             return manageOpenPosition(candle);
         }
 
-        /*
-         * No new trades outside the permitted
-         * entry windows.
-         */
         if (!TradingSession.isNewTradeAllowed(
                 candle.timestamp().toLocalTime())) {
 
@@ -120,9 +110,6 @@ public class TradingEngine {
             );
         }
 
-        /*
-         * Risk management is a hard entry gate.
-         */
         if (!riskManager.canOpenNewTrade()) {
 
             return new TradeResult(
@@ -147,10 +134,6 @@ public class TradingEngine {
                         candle
                 );
 
-        /*
-         * A candle that breaks both sides does not
-         * produce an entry.
-         */
         if (direction != BreakoutDirection.UP &&
                 direction != BreakoutDirection.DOWN) {
 
@@ -238,11 +221,6 @@ public class TradingEngine {
     private TradeResult manageOpenPosition(
             Candle candle) {
 
-        /*
-         * Hard EOD rule.
-         *
-         * At 15:30 all positions must be closed.
-         */
         if (TradingSession.isEndOfDay(
                 candle.timestamp().toLocalTime())) {
 
@@ -262,18 +240,6 @@ public class TradingEngine {
             return result;
         }
 
-        /*
-         * Before target activation:
-         *
-         * We check stop and target using candle
-         * high/low because either level may be
-         * reached intrabar.
-         *
-         * If both are touched in the same candle,
-         * exact order cannot be known from OHLC data.
-         *
-         * We use the conservative STOP-FIRST rule.
-         */
         if (openPosition.hasFixedTarget()) {
 
             if (isStopLossHit(
@@ -317,12 +283,6 @@ public class TradingEngine {
             );
         }
 
-        /*
-         * After target activation, the target has
-         * become the stop loss.
-         *
-         * Now trailing stop is allowed.
-         */
         trailingStopManager.update(
                 openPosition,
                 candle.close()
@@ -443,6 +403,25 @@ public class TradingEngine {
         }
 
         return entryPrice.subtract(amount);
+    }
+
+    /**
+     * Resets daily risk state.
+     *
+     * This must be called when a new trading day starts
+     * during backtesting or live trading.
+     */
+    public void resetDailyRiskState() {
+
+        if (openPosition != null &&
+                openPosition.isOpen()) {
+
+            throw new IllegalStateException(
+                    "Cannot reset daily risk state while a position is open"
+            );
+        }
+
+        riskManager.resetDailyState();
     }
 
     public Position getOpenPosition() {
