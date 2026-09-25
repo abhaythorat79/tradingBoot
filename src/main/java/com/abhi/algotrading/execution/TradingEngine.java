@@ -229,6 +229,8 @@ public class TradingEngine {
                     candle.timestamp()
             );
 
+            recordClosedTradeResult(openPosition);
+
             TradeResult result =
                     new TradeResult(
                             TradeAction.END_OF_DAY_EXIT,
@@ -253,6 +255,8 @@ public class TradingEngine {
                         exitPrice,
                         candle.timestamp()
                 );
+
+                recordClosedTradeResult(openPosition);
 
                 TradeResult result =
                         new TradeResult(
@@ -300,6 +304,8 @@ public class TradingEngine {
                     candle.timestamp()
             );
 
+            recordClosedTradeResult(openPosition);
+
             TradeResult result =
                     new TradeResult(
                             TradeAction.TRAILING_STOP_EXIT,
@@ -314,6 +320,57 @@ public class TradingEngine {
         return new TradeResult(
                 TradeAction.NO_ACTION,
                 openPosition
+        );
+    }
+
+    private void recordClosedTradeResult(
+            Position position) {
+
+        BigDecimal pnl =
+                calculateRealizedPnl(position);
+
+        riskManager.recordTradeResult(pnl);
+    }
+
+    private BigDecimal calculateRealizedPnl(
+            Position position) {
+
+        if (position == null) {
+            throw new IllegalArgumentException(
+                    "Position cannot be null"
+            );
+        }
+
+        if (position.getExitPrice() == null) {
+            throw new IllegalStateException(
+                    "Closed position must have an exit price"
+            );
+        }
+
+        BigDecimal priceDifference;
+
+        if (position.getSide() ==
+                PositionSide.LONG) {
+
+            priceDifference =
+                    position.getExitPrice()
+                            .subtract(
+                                    position.getEntryPrice()
+                            );
+
+        } else {
+
+            priceDifference =
+                    position.getEntryPrice()
+                            .subtract(
+                                    position.getExitPrice()
+                            );
+        }
+
+        return priceDifference.multiply(
+                BigDecimal.valueOf(
+                        position.getQuantity()
+                )
         );
     }
 
@@ -408,8 +465,8 @@ public class TradingEngine {
     /**
      * Resets daily risk state.
      *
-     * This must be called when a new trading day starts
-     * during backtesting or live trading.
+     * A reset is allowed only when there is no
+     * currently open position.
      */
     public void resetDailyRiskState() {
 
