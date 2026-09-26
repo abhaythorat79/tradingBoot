@@ -6,6 +6,9 @@ import com.abhi.algotrading.confirmation.ConfirmationResult;
 import com.abhi.algotrading.marketdata.Candle;
 import com.abhi.algotrading.portfolio.Position;
 import com.abhi.algotrading.portfolio.PositionSide;
+import com.abhi.algotrading.risk.CapitalUtilizationCalculator;
+import com.abhi.algotrading.risk.CapitalUtilizationConfig;
+import com.abhi.algotrading.risk.PositionCapitalCalculator;
 import com.abhi.algotrading.risk.PositionSizer;
 import com.abhi.algotrading.risk.RiskConfig;
 import com.abhi.algotrading.risk.RiskManager;
@@ -25,8 +28,19 @@ public class TradingEngine {
     private final TrailingStopManager trailingStopManager;
     private final RiskConfig riskConfig;
 
+    private final PositionCapitalCalculator positionCapitalCalculator;
+    private final CapitalUtilizationCalculator
+            capitalUtilizationCalculator;
+
     private Position openPosition;
 
+    /*
+     * Backward-compatible constructor.
+     *
+     * Existing tests and callers that do not explicitly
+     * provide capital-utilization configuration will use
+     * 100% utilization.
+     */
     public TradingEngine(
             BreakoutDetector breakoutDetector,
             CandleConfirmation candleConfirmation,
@@ -34,6 +48,34 @@ public class TradingEngine {
             RiskManager riskManager,
             TrailingStopManager trailingStopManager,
             RiskConfig riskConfig) {
+
+        this(
+                breakoutDetector,
+                candleConfirmation,
+                positionSizer,
+                riskManager,
+                trailingStopManager,
+                riskConfig,
+                new CapitalUtilizationCalculator(
+                        new CapitalUtilizationConfig(
+                                new BigDecimal("100")
+                        )
+                )
+        );
+    }
+
+    /*
+     * Constructor with explicit capital-utilization control.
+     */
+    public TradingEngine(
+            BreakoutDetector breakoutDetector,
+            CandleConfirmation candleConfirmation,
+            PositionSizer positionSizer,
+            RiskManager riskManager,
+            TrailingStopManager trailingStopManager,
+            RiskConfig riskConfig,
+            CapitalUtilizationCalculator
+                    capitalUtilizationCalculator) {
 
         if (breakoutDetector == null) {
             throw new IllegalArgumentException(
@@ -71,12 +113,22 @@ public class TradingEngine {
             );
         }
 
+        if (capitalUtilizationCalculator == null) {
+            throw new IllegalArgumentException(
+                    "Capital utilization calculator cannot be null"
+            );
+        }
+
         this.breakoutDetector = breakoutDetector;
         this.candleConfirmation = candleConfirmation;
         this.positionSizer = positionSizer;
         this.riskManager = riskManager;
         this.trailingStopManager = trailingStopManager;
         this.riskConfig = riskConfig;
+        this.positionCapitalCalculator =
+                new PositionCapitalCalculator();
+        this.capitalUtilizationCalculator =
+                capitalUtilizationCalculator;
     }
 
     public TradeResult processCandle(
@@ -95,12 +147,22 @@ public class TradingEngine {
             );
         }
 
+        /*
+         * Existing position always gets managed first.
+         *
+         * Risk-entry restrictions must not prevent
+         * management of an already-open position.
+         */
         if (openPosition != null &&
                 openPosition.isOpen()) {
 
             return manageOpenPosition(candle);
         }
 
+        /*
+         * No new entries outside the allowed
+         * trading windows.
+         */
         if (!TradingSession.isNewTradeAllowed(
                 candle.timestamp().toLocalTime())) {
 
@@ -110,6 +172,9 @@ public class TradingEngine {
             );
         }
 
+        /*
+         * Existing risk controls.
+         */
         if (!riskManager.canOpenNewTrade()) {
 
             return new TradeResult(
@@ -188,6 +253,38 @@ public class TradingEngine {
                 );
 
         if (quantity <= 0) {
+            return new TradeResult(
+                    TradeAction.NO_ACTION,
+                    null
+            );
+        }
+
+        /*
+         * Calculate the actual capital required
+         * for this proposed position.
+         */
+        BigDecimal proposedPositionValue =
+                positionCapitalCalculator.calculatePositionValue(
+                        entryPrice,
+                        quantity
+                );
+
+        /*
+         * Check capital utilization before opening
+         * the position.
+         *
+         * There is no other open position at this
+         * point because processCandle() manages an
+         * existing position before reaching entry logic.
+         */
+        boolean capitalAvailable =
+                capitalUtilizationCalculator.canOpenPosition(
+                        riskConfig.capital(),
+                        BigDecimal.ZERO,
+                        proposedPositionValue
+                );
+
+        if (!capitalAvailable) {
             return new TradeResult(
                     TradeAction.NO_ACTION,
                     null
@@ -462,12 +559,6 @@ public class TradingEngine {
         return entryPrice.subtract(amount);
     }
 
-    /**
-     * Resets daily risk state.
-     *
-     * A reset is allowed only when there is no
-     * currently open position.
-     */
     public void resetDailyRiskState() {
 
         if (openPosition != null &&
