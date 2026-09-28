@@ -321,22 +321,7 @@ public class TradingEngine {
         if (TradingSession.isEndOfDay(
                 candle.timestamp().toLocalTime())) {
 
-            openPosition.close(
-                    candle.close(),
-                    candle.timestamp()
-            );
-
-            recordClosedTradeResult(openPosition);
-
-            TradeResult result =
-                    new TradeResult(
-                            TradeAction.END_OF_DAY_EXIT,
-                            openPosition
-                    );
-
-            openPosition = null;
-
-            return result;
+            return closePositionAtEndOfDay(candle);
         }
 
         if (openPosition.hasFixedTarget()) {
@@ -418,6 +403,55 @@ public class TradingEngine {
                 TradeAction.NO_ACTION,
                 openPosition
         );
+    }
+
+    /*
+     * Controlled end-of-day close.
+     *
+     * This method is intentionally kept inside
+     * TradingEngine so that every EOD close follows
+     * the same lifecycle:
+     *
+     * 1. Close Position
+     * 2. Calculate realized P&L
+     * 3. Record P&L in RiskManager
+     * 4. Clear openPosition
+     * 5. Return END_OF_DAY_EXIT
+     */
+    public TradeResult closePositionAtEndOfDay(
+            Candle candle) {
+
+        if (candle == null) {
+            throw new IllegalArgumentException(
+                    "Candle cannot be null"
+            );
+        }
+
+        if (openPosition == null ||
+                !openPosition.isOpen()) {
+
+            return new TradeResult(
+                    TradeAction.NO_ACTION,
+                    null
+            );
+        }
+
+        openPosition.close(
+                candle.close(),
+                candle.timestamp()
+        );
+
+        recordClosedTradeResult(openPosition);
+
+        TradeResult result =
+                new TradeResult(
+                        TradeAction.END_OF_DAY_EXIT,
+                        openPosition
+                );
+
+        openPosition = null;
+
+        return result;
     }
 
     private void recordClosedTradeResult(
