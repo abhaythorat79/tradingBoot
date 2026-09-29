@@ -117,4 +117,35 @@ class OpeningRangeCalculatorTest {
                 100_000
         );
     }
+
+    @Test
+    void shouldExcludeExactly0930CandleFromOpeningRange() {
+
+        List<Candle> candles = List.of(
+                candle("09:15", "100", "105", "99", "103"),
+                candle("09:20", "103", "108", "102", "107"),
+                candle("09:25", "107", "110", "106", "109"),
+
+                // Exactly 09:30 — MUST NOT affect opening range
+                candle("09:30", "109", "200", "50", "150")
+        );
+
+        OpeningRange result =
+                calculator.calculate(candles);
+
+        assertEquals(
+                new BigDecimal("110"),
+                result.high()
+        );
+
+        assertEquals(
+                new BigDecimal("99"),
+                result.low()
+        );
+
+        assertEquals(
+                new BigDecimal("11"),
+                result.range()
+        );
+    }
 }
