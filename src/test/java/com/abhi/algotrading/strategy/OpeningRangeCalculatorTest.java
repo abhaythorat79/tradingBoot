@@ -148,4 +148,71 @@ class OpeningRangeCalculatorTest {
                 result.range()
         );
     }
+
+
+    @Test
+    void shouldIgnoreCandlesFromAnotherTradingDay() {
+
+        List<Candle> candles = List.of(
+
+                // Trading day 1 — opening range
+                candle(
+                        "09:15",
+                        "100",
+                        "105",
+                        "99",
+                        "103"
+                ),
+                candle(
+                        "09:20",
+                        "103",
+                        "108",
+                        "102",
+                        "107"
+                ),
+                candle(
+                        "09:25",
+                        "107",
+                        "110",
+                        "106",
+                        "109"
+                ),
+
+                // Trading day 1 — after opening range
+                candle(
+                        "09:35",
+                        "109",
+                        "150",
+                        "80",
+                        "120"
+                )
+        );
+
+        OpeningRange result =
+                calculator.calculate(candles);
+
+        assertEquals(
+                new BigDecimal("110"),
+                result.high()
+        );
+
+        assertEquals(
+                new BigDecimal("99"),
+                result.low()
+        );
+
+        assertEquals(
+                LocalDateTime.parse(
+                        "2026-09-17T09:15"
+                ),
+                result.startTime()
+        );
+
+        assertEquals(
+                LocalDateTime.parse(
+                        "2026-09-17T09:30"
+                ),
+                result.endTime()
+        );
+    }
 }

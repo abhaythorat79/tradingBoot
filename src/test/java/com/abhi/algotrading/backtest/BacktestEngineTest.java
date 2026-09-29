@@ -388,4 +388,144 @@ class BacktestEngineTest {
                 volume
         );
     }
+    @Test
+    void shouldNotUseFutureCandleToCreateEarlierTrade() {
+
+        RiskConfig riskConfig =
+                new RiskConfig(
+                        new BigDecimal("100000"),
+                        new BigDecimal("1"),
+                        new BigDecimal("5000"),
+                        3,
+                        3,
+                        new BigDecimal("1"),
+                        new BigDecimal("2"),
+                        new BigDecimal("1")
+                );
+
+        RiskManager riskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine tradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        riskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine backtestEngine =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        tradingEngine
+                );
+
+        List<Candle> candles =
+                List.of(
+
+                        /*
+                         * Opening Range
+                         */
+                        candle(
+                                "09:15:00",
+                                "100",
+                                "105",
+                                "99",
+                                "103",
+                                100000
+                        ),
+
+                        candle(
+                                "09:20:00",
+                                "103",
+                                "108",
+                                "102",
+                                "107",
+                                100000
+                        ),
+
+                        candle(
+                                "09:25:00",
+                                "107",
+                                "110",
+                                "106",
+                                "109",
+                                100000
+                        ),
+
+                        /*
+                         * 09:30
+                         *
+                         * No breakout.
+                         * Therefore there must be no trade here.
+                         */
+                        candle(
+                                "09:30:00",
+                                "109",
+                                "109",
+                                "108",
+                                "108.50",
+                                100000
+                        ),
+
+                        /*
+                         * 10:00
+                         *
+                         * Future breakout.
+                         *
+                         * This candle is allowed to create a trade
+                         * at 10:00, but it must NOT retroactively
+                         * create a trade at 09:30.
+                         */
+                        candle(
+                                "10:00:00",
+                                "109",
+                                "120",
+                                "108",
+                                "115",
+                                150000
+                        ),
+
+                        /*
+                         * 15:30
+                         */
+                        candle(
+                                "15:30:00",
+                                "115",
+                                "116",
+                                "114",
+                                "115",
+                                100000
+                        )
+                );
+
+        BacktestResult result =
+                backtestEngine.run(candles);
+
+        /*
+         * Exactly one trade may exist.
+         *
+         * It must originate from the future 10:00
+         * breakout candle, not from 09:30.
+         */
+        assertEquals(
+                1,
+                result.getTotalTrades()
+        );
+
+        BacktestTrade trade =
+                result.getTrades().getFirst();
+
+        assertEquals(
+                LocalDateTime.parse(
+                        "2026-09-21T10:00:00"
+                ),
+                trade.entryTime()
+        );
+    }
 }
