@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -713,6 +714,202 @@ class BacktestEngineTest {
         assertEquals(
                 day1OnlyTrade.exitReason(),
                 combinedDay1Trade.exitReason()
+        );
+    }
+
+    @Test
+    void shouldProduceSameResultWhenCandlesAreOutOfOrder() {
+
+        RiskConfig riskConfig =
+                new RiskConfig(
+                        new BigDecimal("100000"),
+                        new BigDecimal("1"),
+                        new BigDecimal("5000"),
+                        3,
+                        3,
+                        new BigDecimal("1"),
+                        new BigDecimal("2"),
+                        new BigDecimal("1")
+                );
+
+        /*
+         * -------------------------
+         * CHRONOLOGICAL DATA
+         * -------------------------
+         */
+
+        RiskManager chronologicalRiskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine chronologicalTradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        chronologicalRiskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine chronologicalBacktest =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        chronologicalTradingEngine
+                );
+
+        List<Candle> chronologicalCandles =
+                createTradingDay();
+
+        BacktestResult chronologicalResult =
+                chronologicalBacktest.run(
+                        chronologicalCandles
+                );
+
+        /*
+         * -------------------------
+         * OUT-OF-ORDER DATA
+         * -------------------------
+         *
+         * Reverse the exact same candles.
+         *
+         * The data is intentionally NOT
+         * chronological when supplied to
+         * BacktestEngine.
+         */
+
+        List<Candle> outOfOrderCandles =
+                new ArrayList<>(
+                        createTradingDay()
+                );
+
+        Collections.reverse(
+                outOfOrderCandles
+        );
+
+        RiskManager outOfOrderRiskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine outOfOrderTradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        outOfOrderRiskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine outOfOrderBacktest =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        outOfOrderTradingEngine
+                );
+
+        BacktestResult outOfOrderResult =
+                outOfOrderBacktest.run(
+                        outOfOrderCandles
+                );
+
+        /*
+         * The chronological and out-of-order
+         * datasets contain exactly the same
+         * market candles.
+         *
+         * Therefore the backtest result must
+         * be identical.
+         */
+
+        assertEquals(
+                chronologicalResult.getTradingDays(),
+                outOfOrderResult.getTradingDays()
+        );
+
+        assertEquals(
+                chronologicalResult.getTotalTrades(),
+                outOfOrderResult.getTotalTrades()
+        );
+
+        assertEquals(
+                chronologicalResult.getWinningTrades(),
+                outOfOrderResult.getWinningTrades()
+        );
+
+        assertEquals(
+                chronologicalResult.getLosingTrades(),
+                outOfOrderResult.getLosingTrades()
+        );
+
+        assertEquals(
+                chronologicalResult.getGrossPnl(),
+                outOfOrderResult.getGrossPnl()
+        );
+
+        /*
+         * Compare the actual trade details.
+         */
+
+        assertEquals(
+                chronologicalResult.getTrades().size(),
+                outOfOrderResult.getTrades().size()
+        );
+
+        BacktestTrade chronologicalTrade =
+                chronologicalResult.getTrades()
+                        .getFirst();
+
+        BacktestTrade outOfOrderTrade =
+                outOfOrderResult.getTrades()
+                        .getFirst();
+
+        assertEquals(
+                chronologicalTrade.symbol(),
+                outOfOrderTrade.symbol()
+        );
+
+        assertEquals(
+                chronologicalTrade.side(),
+                outOfOrderTrade.side()
+        );
+
+        assertEquals(
+                chronologicalTrade.quantity(),
+                outOfOrderTrade.quantity()
+        );
+
+        assertEquals(
+                chronologicalTrade.entryPrice(),
+                outOfOrderTrade.entryPrice()
+        );
+
+        assertEquals(
+                chronologicalTrade.exitPrice(),
+                outOfOrderTrade.exitPrice()
+        );
+
+        assertEquals(
+                chronologicalTrade.entryTime(),
+                outOfOrderTrade.entryTime()
+        );
+
+        assertEquals(
+                chronologicalTrade.exitTime(),
+                outOfOrderTrade.exitTime()
+        );
+
+        assertEquals(
+                chronologicalTrade.grossPnl(),
+                outOfOrderTrade.grossPnl()
+        );
+
+        assertEquals(
+                chronologicalTrade.exitReason(),
+                outOfOrderTrade.exitReason()
         );
     }
 
