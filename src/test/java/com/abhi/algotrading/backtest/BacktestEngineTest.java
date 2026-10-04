@@ -388,6 +388,7 @@ class BacktestEngineTest {
                 volume
         );
     }
+
     @Test
     void shouldNotUseFutureCandleToCreateEarlierTrade() {
 
@@ -526,6 +527,390 @@ class BacktestEngineTest {
                         "2026-09-21T10:00:00"
                 ),
                 trade.entryTime()
+        );
+    }
+
+    @Test
+    void shouldKeepTradingDaysIsolated() {
+
+        RiskConfig riskConfig =
+                new RiskConfig(
+                        new BigDecimal("100000"),
+                        new BigDecimal("1"),
+                        new BigDecimal("5000"),
+                        3,
+                        3,
+                        new BigDecimal("1"),
+                        new BigDecimal("2"),
+                        new BigDecimal("1")
+                );
+
+        /*
+         * -------------------------
+         * BACKTEST WITH DAY 1 ONLY
+         * -------------------------
+         */
+
+        RiskManager day1OnlyRiskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine day1OnlyTradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        day1OnlyRiskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine day1OnlyBacktest =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        day1OnlyTradingEngine
+                );
+
+        List<Candle> day1OnlyCandles =
+                createDay1ForIsolationTest();
+
+        BacktestResult day1OnlyResult =
+                day1OnlyBacktest.run(
+                        day1OnlyCandles
+                );
+
+        /*
+         * Day 1 must produce exactly one
+         * trading day and one trade.
+         */
+
+        assertEquals(
+                1,
+                day1OnlyResult.getTradingDays()
+        );
+
+        assertEquals(
+                1,
+                day1OnlyResult.getTotalTrades()
+        );
+
+        BacktestTrade day1OnlyTrade =
+                day1OnlyResult.getTrades().getFirst();
+
+        /*
+         * -------------------------
+         * BACKTEST WITH DAY 1 + DAY 2
+         * -------------------------
+         */
+
+        RiskManager twoDayRiskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine twoDayTradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        twoDayRiskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine twoDayBacktest =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        twoDayTradingEngine
+                );
+
+        List<Candle> twoDayCandles =
+                new ArrayList<>(
+                        day1OnlyCandles
+                );
+
+        twoDayCandles.addAll(
+                createDay2ForIsolationTest()
+        );
+
+        BacktestResult twoDayResult =
+                twoDayBacktest.run(
+                        twoDayCandles
+                );
+
+        /*
+         * There must now be exactly two
+         * trading days.
+         */
+
+        assertEquals(
+                2,
+                twoDayResult.getTradingDays()
+        );
+
+        /*
+         * Each day should produce one trade.
+         */
+
+        assertEquals(
+                2,
+                twoDayResult.getTotalTrades()
+        );
+
+        /*
+         * Find the Day 1 trade from the
+         * combined two-day backtest.
+         */
+
+        BacktestTrade combinedDay1Trade =
+                twoDayResult.getTrades()
+                        .stream()
+                        .filter(trade ->
+                                trade.entryTime()
+                                        .toLocalDate()
+                                        .equals(
+                                                LocalDateTime.parse(
+                                                        "2026-09-21T09:30:00"
+                                                ).toLocalDate()
+                                        )
+                        )
+                        .findFirst()
+                        .orElseThrow();
+
+        /*
+         * Day 1 entry must remain exactly
+         * the same after adding Day 2.
+         */
+
+        assertEquals(
+                day1OnlyTrade.entryTime(),
+                combinedDay1Trade.entryTime()
+        );
+
+        assertEquals(
+                day1OnlyTrade.entryPrice(),
+                combinedDay1Trade.entryPrice()
+        );
+
+        assertEquals(
+                day1OnlyTrade.exitPrice(),
+                combinedDay1Trade.exitPrice()
+        );
+
+        assertEquals(
+                day1OnlyTrade.quantity(),
+                combinedDay1Trade.quantity()
+        );
+
+        assertEquals(
+                day1OnlyTrade.grossPnl(),
+                combinedDay1Trade.grossPnl()
+        );
+
+        assertEquals(
+                day1OnlyTrade.exitReason(),
+                combinedDay1Trade.exitReason()
+        );
+    }
+
+    private List<Candle> createDay1ForIsolationTest() {
+
+        List<Candle> candles =
+                new ArrayList<>();
+
+        /*
+         * Day 1
+         *
+         * Date = 2026-09-21
+         *
+         * Opening Range:
+         *
+         * High = 110
+         * Low  = 99
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-21",
+                        "09:15:00",
+                        "100",
+                        "105",
+                        "99",
+                        "103",
+                        100000
+                )
+        );
+
+        candles.add(
+                candle(
+                        "2026-09-21",
+                        "09:20:00",
+                        "103",
+                        "108",
+                        "102",
+                        "107",
+                        100000
+                )
+        );
+
+        candles.add(
+                candle(
+                        "2026-09-21",
+                        "09:25:00",
+                        "107",
+                        "110",
+                        "106",
+                        "109",
+                        100000
+                )
+        );
+
+        /*
+         * 09:30 breakout.
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-21",
+                        "09:30:00",
+                        "109",
+                        "120",
+                        "108",
+                        "115",
+                        150000
+                )
+        );
+
+        /*
+         * 15:30 EOD.
+         *
+         * The open position must be closed
+         * by the end of the trading day.
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-21",
+                        "15:30:00",
+                        "115",
+                        "116",
+                        "114",
+                        "115",
+                        100000
+                )
+        );
+
+        return candles;
+    }
+
+    private List<Candle> createDay2ForIsolationTest() {
+
+        List<Candle> candles =
+                new ArrayList<>();
+
+        /*
+         * Day 2
+         *
+         * IMPORTANT:
+         *
+         * This is a different trading date.
+         *
+         * Date = 2026-09-22
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-22",
+                        "09:15:00",
+                        "200",
+                        "205",
+                        "198",
+                        "203",
+                        100000
+                )
+        );
+
+        candles.add(
+                candle(
+                        "2026-09-22",
+                        "09:20:00",
+                        "203",
+                        "208",
+                        "202",
+                        "207",
+                        100000
+                )
+        );
+
+        candles.add(
+                candle(
+                        "2026-09-22",
+                        "09:25:00",
+                        "207",
+                        "210",
+                        "206",
+                        "209",
+                        100000
+                )
+        );
+
+        /*
+         * 09:30 breakout.
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-22",
+                        "09:30:00",
+                        "209",
+                        "220",
+                        "208",
+                        "215",
+                        150000
+                )
+        );
+
+        /*
+         * 15:30 EOD.
+         */
+
+        candles.add(
+                candle(
+                        "2026-09-22",
+                        "15:30:00",
+                        "215",
+                        "216",
+                        "214",
+                        "215",
+                        100000
+                )
+        );
+
+        return candles;
+    }
+
+    private Candle candle(
+            String date,
+            String time,
+            String open,
+            String high,
+            String low,
+            String close,
+            long volume) {
+
+        return new Candle(
+                LocalDateTime.parse(
+                        date + "T" + time
+                ),
+                "NIFTY",
+                new BigDecimal(open),
+                new BigDecimal(high),
+                new BigDecimal(low),
+                new BigDecimal(close),
+                volume
         );
     }
 }
