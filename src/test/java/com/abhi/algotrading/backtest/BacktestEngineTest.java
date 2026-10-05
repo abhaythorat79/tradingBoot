@@ -718,7 +718,7 @@ class BacktestEngineTest {
     }
 
     @Test
-    void shouldProduceSameResultWhenCandlesAreOutOfOrder() {
+    void shouldRejectOutOfOrderCandles() {
 
         RiskConfig riskConfig =
                 new RiskConfig(
@@ -732,184 +732,56 @@ class BacktestEngineTest {
                         new BigDecimal("1")
                 );
 
-        /*
-         * -------------------------
-         * CHRONOLOGICAL DATA
-         * -------------------------
-         */
-
-        RiskManager chronologicalRiskManager =
+        RiskManager riskManager =
                 new RiskManager(riskConfig);
 
-        TradingEngine chronologicalTradingEngine =
+        TradingEngine tradingEngine =
                 new TradingEngine(
                         new BreakoutDetector(),
                         new CandleConfirmation(),
                         new PositionSizer(),
-                        chronologicalRiskManager,
+                        riskManager,
                         new TrailingStopManager(
                                 new BigDecimal("1")
                         ),
                         riskConfig
                 );
 
-        BacktestEngine chronologicalBacktest =
+        BacktestEngine backtestEngine =
                 new BacktestEngine(
                         new MarketDataValidator(),
                         new OpeningRangeCalculator(),
-                        chronologicalTradingEngine
+                        tradingEngine
                 );
 
-        List<Candle> chronologicalCandles =
-                createTradingDay();
-
-        BacktestResult chronologicalResult =
-                chronologicalBacktest.run(
-                        chronologicalCandles
-                );
-
-        /*
-         * -------------------------
-         * OUT-OF-ORDER DATA
-         * -------------------------
-         *
-         * Reverse the exact same candles.
-         *
-         * The data is intentionally NOT
-         * chronological when supplied to
-         * BacktestEngine.
-         */
-
-        List<Candle> outOfOrderCandles =
+        List<Candle> candles =
                 new ArrayList<>(
                         createTradingDay()
                 );
 
-        Collections.reverse(
-                outOfOrderCandles
-        );
-
-        RiskManager outOfOrderRiskManager =
-                new RiskManager(riskConfig);
-
-        TradingEngine outOfOrderTradingEngine =
-                new TradingEngine(
-                        new BreakoutDetector(),
-                        new CandleConfirmation(),
-                        new PositionSizer(),
-                        outOfOrderRiskManager,
-                        new TrailingStopManager(
-                                new BigDecimal("1")
-                        ),
-                        riskConfig
-                );
-
-        BacktestEngine outOfOrderBacktest =
-                new BacktestEngine(
-                        new MarketDataValidator(),
-                        new OpeningRangeCalculator(),
-                        outOfOrderTradingEngine
-                );
-
-        BacktestResult outOfOrderResult =
-                outOfOrderBacktest.run(
-                        outOfOrderCandles
-                );
-
         /*
-         * The chronological and out-of-order
-         * datasets contain exactly the same
-         * market candles.
+         * Intentionally swap two candles.
          *
-         * Therefore the backtest result must
-         * be identical.
+         * This creates invalid chronological
+         * market data.
          */
-
-        assertEquals(
-                chronologicalResult.getTradingDays(),
-                outOfOrderResult.getTradingDays()
+        Collections.swap(
+                candles,
+                0,
+                1
         );
 
-        assertEquals(
-                chronologicalResult.getTotalTrades(),
-                outOfOrderResult.getTotalTrades()
-        );
+        IllegalArgumentException exception =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> backtestEngine.run(candles)
+                );
 
-        assertEquals(
-                chronologicalResult.getWinningTrades(),
-                outOfOrderResult.getWinningTrades()
-        );
-
-        assertEquals(
-                chronologicalResult.getLosingTrades(),
-                outOfOrderResult.getLosingTrades()
-        );
-
-        assertEquals(
-                chronologicalResult.getGrossPnl(),
-                outOfOrderResult.getGrossPnl()
-        );
-
-        /*
-         * Compare the actual trade details.
-         */
-
-        assertEquals(
-                chronologicalResult.getTrades().size(),
-                outOfOrderResult.getTrades().size()
-        );
-
-        BacktestTrade chronologicalTrade =
-                chronologicalResult.getTrades()
-                        .getFirst();
-
-        BacktestTrade outOfOrderTrade =
-                outOfOrderResult.getTrades()
-                        .getFirst();
-
-        assertEquals(
-                chronologicalTrade.symbol(),
-                outOfOrderTrade.symbol()
-        );
-
-        assertEquals(
-                chronologicalTrade.side(),
-                outOfOrderTrade.side()
-        );
-
-        assertEquals(
-                chronologicalTrade.quantity(),
-                outOfOrderTrade.quantity()
-        );
-
-        assertEquals(
-                chronologicalTrade.entryPrice(),
-                outOfOrderTrade.entryPrice()
-        );
-
-        assertEquals(
-                chronologicalTrade.exitPrice(),
-                outOfOrderTrade.exitPrice()
-        );
-
-        assertEquals(
-                chronologicalTrade.entryTime(),
-                outOfOrderTrade.entryTime()
-        );
-
-        assertEquals(
-                chronologicalTrade.exitTime(),
-                outOfOrderTrade.exitTime()
-        );
-
-        assertEquals(
-                chronologicalTrade.grossPnl(),
-                outOfOrderTrade.grossPnl()
-        );
-
-        assertEquals(
-                chronologicalTrade.exitReason(),
-                outOfOrderTrade.exitReason()
+        assertTrue(
+                exception.getMessage()
+                        .contains(
+                                "Candles must be in chronological order"
+                        )
         );
     }
 
