@@ -982,4 +982,88 @@ class BacktestEngineTest {
                 volume
         );
     }
+
+    @Test
+    void shouldRejectDuplicateTimestampCandles() {
+
+        RiskConfig riskConfig =
+                new RiskConfig(
+                        new BigDecimal("100000"),
+                        new BigDecimal("1"),
+                        new BigDecimal("5000"),
+                        3,
+                        3,
+                        new BigDecimal("1"),
+                        new BigDecimal("2"),
+                        new BigDecimal("1")
+                );
+
+        RiskManager riskManager =
+                new RiskManager(riskConfig);
+
+        TradingEngine tradingEngine =
+                new TradingEngine(
+                        new BreakoutDetector(),
+                        new CandleConfirmation(),
+                        new PositionSizer(),
+                        riskManager,
+                        new TrailingStopManager(
+                                new BigDecimal("1")
+                        ),
+                        riskConfig
+                );
+
+        BacktestEngine backtestEngine =
+                new BacktestEngine(
+                        new MarketDataValidator(),
+                        new OpeningRangeCalculator(),
+                        tradingEngine
+                );
+
+        List<Candle> candles =
+                new ArrayList<>();
+
+        /*
+         * First candle.
+         */
+        candles.add(
+                candle(
+                        "09:15:00",
+                        "25000",
+                        "25020",
+                        "24990",
+                        "25010",
+                        100000
+                )
+        );
+
+        /*
+         * Second candle has the EXACT
+         * same timestamp as the first candle.
+         *
+         * This must be rejected.
+         */
+        candles.add(
+                candle(
+                        "09:15:00",
+                        "25010",
+                        "25030",
+                        "25000",
+                        "25025",
+                        120000
+                )
+        );
+
+        IllegalArgumentException exception =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () -> backtestEngine.run(candles)
+                );
+
+        assertTrue(
+                exception.getMessage()
+                        .contains("Duplicate timestamp")
+        );
+    }
+
 }

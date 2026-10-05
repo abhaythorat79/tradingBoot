@@ -24,11 +24,35 @@ public class BacktestEngine {
     private final MarketDataValidator marketDataValidator;
     private final OpeningRangeCalculator openingRangeCalculator;
     private final TradingEngine tradingEngine;
+    private final SlippageSimulator slippageSimulator;
 
+    /*
+     * Backward-compatible constructor.
+     *
+     * Existing callers continue to work exactly as before.
+     * Default slippage is 0%.
+     */
     public BacktestEngine(
             MarketDataValidator marketDataValidator,
             OpeningRangeCalculator openingRangeCalculator,
             TradingEngine tradingEngine) {
+
+        this(
+                marketDataValidator,
+                openingRangeCalculator,
+                tradingEngine,
+                new SlippageSimulator(BigDecimal.ZERO)
+        );
+    }
+
+    /*
+     * Constructor allowing explicit slippage configuration.
+     */
+    public BacktestEngine(
+            MarketDataValidator marketDataValidator,
+            OpeningRangeCalculator openingRangeCalculator,
+            TradingEngine tradingEngine,
+            SlippageSimulator slippageSimulator) {
 
         if (marketDataValidator == null) {
             throw new IllegalArgumentException(
@@ -48,13 +72,19 @@ public class BacktestEngine {
             );
         }
 
+        if (slippageSimulator == null) {
+            throw new IllegalArgumentException(
+                    "Slippage simulator cannot be null"
+            );
+        }
+
         this.marketDataValidator = marketDataValidator;
         this.openingRangeCalculator = openingRangeCalculator;
         this.tradingEngine = tradingEngine;
+        this.slippageSimulator = slippageSimulator;
     }
 
-    public BacktestResult run(
-            List<Candle> candles) {
+    public BacktestResult run(List<Candle> candles) {
 
         marketDataValidator.validate(candles);
 
@@ -64,22 +94,8 @@ public class BacktestEngine {
         List<BacktestTrade> trades =
                 new ArrayList<>();
 
-        for (List<Candle> dayCandles :
-                candlesByDay.values()) {
+        for (List<Candle> dayCandles : candlesByDay.values()) {
 
-            /*
-             * Every trading day gets a fresh daily
-             * risk state.
-             *
-             * This prevents:
-             *
-             * Day 1 trades
-             *       ↓
-             * Day 2 incorrectly blocked
-             *
-             * because of Day 1's trade count,
-             * consecutive losses or daily risk state.
-             */
             tradingEngine.resetDailyRiskState();
 
             trades.addAll(
@@ -136,7 +152,6 @@ public class BacktestEngine {
                         result.position();
 
                 if (completedPosition == null) {
-
                     throw new IllegalStateException(
                             "Exit action returned without a position: "
                                     + result.action()
@@ -152,30 +167,42 @@ public class BacktestEngine {
             }
         }
 
-        /*
-         * Safety fallback:
-         *
-         * If a position somehow remains open after
-         * processing the final candle, close it.
-         */
         Position remainingPosition =
                 tradingEngine.getOpenPosition();
 
-        if (remainingPosition != null &&
-                remainingPosition.isOpen()) {
+        if (remainingPosition != null
+                && remainingPosition.isOpen()) {
 
             Candle lastCandle =
                     dayCandles.getLast();
 
-            remainingPosition.close(
-                    lastCandle.close(),
-                    lastCandle.timestamp()
-            );
+            TradeResult endOfDayResult =
+                    tradingEngine.closePositionAtEndOfDay(
+                            lastCandle
+                    );
+
+            if (endOfDayResult.action()
+                    != TradeAction.END_OF_DAY_EXIT) {
+
+                throw new IllegalStateException(
+                        "Expected END_OF_DAY_EXIT but received: "
+                                + endOfDayResult.action()
+                );
+            }
+
+            Position completedPosition =
+                    endOfDayResult.position();
+
+            if (completedPosition == null) {
+                throw new IllegalStateException(
+                        "End-of-day exit returned without a position"
+                );
+            }
 
             trades.add(
                     createBacktestTrade(
-                            remainingPosition,
-                            TradeAction.END_OF_DAY_EXIT
+                            completedPosition,
+                            endOfDayResult.action()
                     )
             );
         }
@@ -200,7 +227,8 @@ public class BacktestEngine {
         for (Candle candle : candles) {
 
             LocalDate date =
-                    candle.timestamp().toLocalDate();
+                    candle.timestamp()
+                            .toLocalDate();
 
             result.computeIfAbsent(
                     date,
@@ -228,43 +256,61 @@ public class BacktestEngine {
                 .isBefore(
                         TradingSession.MARKET_OPEN
                 )
-                &&
-                candle.timestamp()
-                        .toLocalTime()
-                        .isBefore(
-                                TradingSession.OPENING_RANGE_END
-                        );
+                && candle.timestamp()
+                .toLocalTime()
+                .isBefore(
+                        TradingSession.OPENING_RANGE_END
+                );
     }
 
     private BacktestTrade createBacktestTrade(
             Position position,
             TradeAction action) {
 
-        BigDecimal entryPrice =
+        BigDecimal theoreticalEntryPrice =
                 position.getEntryPrice();
 
-        BigDecimal exitPrice =
+        BigDecimal theoreticalExitPrice =
                 position.getExitPrice();
 
-        if (exitPrice == null) {
-
+        if (theoreticalExitPrice == null) {
             throw new IllegalStateException(
                     "Completed position has no exit price"
             );
         }
 
+        /*
+         * Apply execution slippage only at the
+         * backtest execution/reporting boundary.
+         *
+         * TradingEngine continues to operate on
+         * theoretical strategy prices.
+         */
+        BigDecimal executedEntryPrice =
+                slippageSimulator.simulateEntry(
+                        position.getSide(),
+                        theoreticalEntryPrice
+                );
+
+        BigDecimal executedExitPrice =
+                slippageSimulator.simulateExit(
+                        position.getSide(),
+                        theoreticalExitPrice
+                );
+
         BigDecimal grossPnl =
                 calculateGrossPnl(
                         position,
-                        exitPrice
+                        executedEntryPrice,
+                        executedExitPrice
                 );
 
         return new BacktestTrade(
                 position.getSymbol(),
                 position.getSide(),
                 position.getQuantity(),
-                entryPrice,
-                exitPrice,
+                executedEntryPrice,
+                executedExitPrice,
                 position.getEntryTime(),
                 position.getExitTime(),
                 grossPnl,
@@ -274,23 +320,25 @@ public class BacktestEngine {
 
     private BigDecimal calculateGrossPnl(
             Position position,
+            BigDecimal entryPrice,
             BigDecimal exitPrice) {
 
         BigDecimal priceDifference;
 
-        if (position.getSide() ==
-                PositionSide.LONG) {
+        if (position.getSide()
+                == PositionSide.LONG) {
 
             priceDifference =
                     exitPrice.subtract(
-                            position.getEntryPrice()
+                            entryPrice
                     );
 
         } else {
 
             priceDifference =
-                    position.getEntryPrice()
-                            .subtract(exitPrice);
+                    entryPrice.subtract(
+                            exitPrice
+                    );
         }
 
         return priceDifference.multiply(
